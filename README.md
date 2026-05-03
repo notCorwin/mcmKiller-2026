@@ -1,0 +1,2 @@
+# 2026-MAYDAY-MCM
+2026五一建模GitHub仓库
