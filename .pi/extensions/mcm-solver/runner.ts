@@ -1,7 +1,6 @@
 /**
  * Subprocess runner — spawns pi processes for isolated problem solving.
- *
- * Reuses the architecture from examples/extensions/subagent/index.ts.
+ * Stderr is forwarded to parent process for live monitoring.
  */
 
 import { spawn } from "node:child_process";
@@ -67,13 +66,11 @@ function getPiInvocation(args: string[]): { command: string; args: string[] } {
   if (currentScript && !isBunVirtualScript && fs.existsSync(currentScript)) {
     return { command: process.execPath, args: [currentScript, ...args] };
   }
-
   const execName = path.basename(process.execPath).toLowerCase();
   const isGenericRuntime = /^(node|bun)(\.exe)?$/.test(execName);
   if (!isGenericRuntime) {
     return { command: process.execPath, args };
   }
-
   return { command: "pi", args };
 }
 
@@ -92,9 +89,11 @@ export function getFinalOutput(messages: Message[]): string {
 export async function runSingleAgent(
   config: RunnerConfig,
   signal: AbortSignal | undefined,
+  logPrefix?: string,
 ): Promise<SingleResult> {
   const { agent, task, cwd, modelOverride, additionalSystemPrompt, timeoutMs } =
     config;
+  const prefix = logPrefix ?? `[${agent.name}]`;
 
   const args: string[] = ["--mode", "json", "-p", "--no-session"];
   const model = modelOverride ?? agent.model;
@@ -136,6 +135,9 @@ export async function runSingleAgent(
     }
 
     args.push(`Task: ${task}`);
+    console.error(
+      `${prefix} starting pi subprocess (model=${model}, tools=${agent.tools?.join(",") || "none"})...`,
+    );
     let wasAborted = false;
     let timedOut = false;
 
@@ -187,12 +189,50 @@ export async function runSingleAgent(
               currentResult.model = msg.model;
             if (msg.stopReason) currentResult.stopReason = msg.stopReason;
             if (msg.errorMessage) currentResult.errorMessage = msg.errorMessage;
+
+            // Log turn summary to stderr (visible in parent)
+            const toolCallCount = msg.content.filter(
+              (c: any) => c.type === "tool_call",
+            ).length;
+            const textLen = msg.content
+              .filter((c: any) => c.type === "text")
+              .reduce((s: number, c: any) => s + (c.text?.length ?? 0), 0);
+            console.error(
+              `${prefix} turn ${currentResult.usage.turns}: ${textLen} text chars, ${toolCallCount} tool calls, model=${msg.model || currentResult.model}, cost=$${(usage?.cost?.total ?? 0).toFixed(6)}`,
+            );
           }
         }
 
         if (event.type === "tool_result_end" && event.message) {
           currentResult.messages.push(event.message as Message);
+          const tr = event.message as any;
+          if (tr.toolCallId) {
+            const toolName = tr.toolName || tr.name || "?";
+            const contentLen = tr.content
+              ? tr.content.reduce((s: number, c: any) => s + (c.text?.length ?? 0), 0)
+              : 0;
+            console.error(prefix + " tool_result: " + toolName + " (" + contentLen + " chars)");
+          }
         }
+
+        // Stream thinking deltas (truncate long bursts)
+        if (event.type === "message_update" && event.assistantMessageEvent?.type === "thinking_delta") {
+          const delta = event.assistantMessageEvent.delta;
+          if (delta && delta.length < 80) process.stderr.write(delta);
+        }
+
+        // Stream text deltas to terminal
+        if (event.type === "message_update" && event.assistantMessageEvent?.type === "text_delta") {
+          process.stderr.write(event.assistantMessageEvent.delta);
+        }
+
+        // Log tool calls with args preview
+        if (event.type === "message_update" && event.assistantMessageEvent?.type === "tool_call") {
+          const tc = event.assistantMessageEvent;
+          const argsPreview = JSON.stringify(tc.args || {}).slice(0, 150);
+          console.error(prefix + " tool_call: " + (tc.toolName || tc.name) + "(" + argsPreview + ")");
+        }
+
       };
 
       proc.stdout.on("data", (data) => {
@@ -202,8 +242,11 @@ export async function runSingleAgent(
         for (const line of lines) processLine(line);
       });
 
+      // Forward stderr in real-time so the user sees progress
       proc.stderr.on("data", (data) => {
-        currentResult.stderr += data.toString();
+        const text = data.toString();
+        currentResult.stderr += text;
+        process.stderr.write(text);
       });
 
       proc.on("close", (code) => {
@@ -233,9 +276,11 @@ export async function runSingleAgent(
 
     currentResult.exitCode = exitCode;
     if (wasAborted) throw new Error("Solver subprocess was aborted");
-    if (timedOut) {
-      currentResult.errorMessage = `Timed out after ${timeoutMs}ms`;
-    }
+    if (timedOut) currentResult.errorMessage = `Timed out after ${timeoutMs}ms`;
+
+    console.error(
+      `${prefix} finished: exit=${exitCode}, turns=${currentResult.usage.turns}, cost=$${currentResult.usage.cost.toFixed(6)}`,
+    );
     return currentResult;
   } finally {
     if (tmpPromptPath)
