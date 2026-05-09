@@ -77,11 +77,10 @@ async function main() {
 
   let problemDirs = findProblemDirs(problemsRoot);
 
-  // Check for --problem flag
-  const problemArg = process.argv.find((a) => a.startsWith("--problem="));
-  if (problemArg) {
-    const target = problemArg.split("=")[1];
-    const targetPath = path.resolve(cwd, target);
+  // First positional arg = specific problem dir (relative or absolute)
+  const problemArg = process.argv[2];
+  if (problemArg && !problemArg.startsWith("-")) {
+    const targetPath = path.resolve(cwd, problemArg);
     if (fs.existsSync(targetPath)) {
       problemDirs = [targetPath];
     } else {
