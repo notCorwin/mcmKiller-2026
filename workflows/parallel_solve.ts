@@ -28,7 +28,6 @@ import {
   SessionManager,
   AuthStorage,
   ModelRegistry,
-  type SessionMessageEntry,
 } from "@mariozechner/pi-coding-agent";
 import { getModel } from "@mariozechner/pi-ai";
 
@@ -167,8 +166,8 @@ async function main() {
 
   const entries = analysisSM.getEntries();
   const problemEntry = entries.find(
-    (e): e is SessionMessageEntry =>
-      e.type === "message" && e.message.role === "user",
+    (e): e is { type: "message"; message: { role: string }; id: string } =>
+      e.type === "message" && (e as any).message?.role === "user",
   );
   if (!problemEntry) throw new Error("未找到问题消息");
 
