@@ -19,7 +19,7 @@ const CONFIG: Omit<SolveConfig, "cwd"> = {
   maxRetries: 3,
   maxOptimizeRounds: 2,
   optimizeModel: "",
-  timeoutPerPhaseMs: 300_000,
+  timeoutPerPhaseMs: 900_000,
   tolerance: 0.01,
 };
 
