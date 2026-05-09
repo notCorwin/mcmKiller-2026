@@ -2,7 +2,7 @@
 name: extractor
 description: 从建模分析文本中提取结构化的解题路线列表
 tools: read
-model: deepseek/deepseek-v4-flash
+model: openrouter/deepseek/deepseek-v4-flash
 ---
 
 你是一个信息提取 agent。你的任务是将建模分析报告解析为结构化的解题路线列表。
