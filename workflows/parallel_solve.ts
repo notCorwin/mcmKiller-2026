@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * solve.ts — MCM 解题工作流
+ * parallel_solve.ts — MCM 解题工作流
  *
  * 分析题目 → 提取解题思路 → fork 出 N 个 Session 并行编码 → 交叉比对
  *
  * 用法:
- *   npx tsx workflows/solve.ts <problem.md> [--model provider/id]
+ *   node workflows/parallel_solve.ts <problem.md> [--model provider/id]
  *
  * 流程:
  *   1. 分析 Agent 读题，列出若干解题思路
@@ -46,7 +46,7 @@ interface Result {
 const PROBLEM_FILE = process.argv[2];
 if (!PROBLEM_FILE || !existsSync(PROBLEM_FILE)) {
   console.error(
-    "用法: npx tsx workflows/solve.ts <problem.md> [--model provider/id]",
+    "用法: node workflows/parallel_solve.ts <problem.md> [--model provider/id]",
   );
   process.exit(1);
 }
@@ -96,6 +96,63 @@ function lastAssistantText(messages: any[]): string {
     .join("\n");
 }
 
+// ─── 流式输出 ────────────────────────────────────────────────
+
+function subscribeSession(label: string, session: any): () => void {
+  return session.subscribe((event: any) => {
+    switch (event.type) {
+      case "message_update": {
+        const ev = event.assistantMessageEvent;
+        if (ev.type === "text_delta") {
+          process.stdout.write(ev.delta);
+        } else if (ev.type === "thinking_delta") {
+          process.stdout.write(ev.delta);
+        }
+        break;
+      }
+      case "tool_execution_start":
+        console.log(`\n[${label}] 工具调用: ${event.toolName}`);
+        break;
+      case "tool_execution_update":
+        if (event.type === "tool_execution_update" && event.content) {
+          process.stdout.write(event.content);
+        }
+        break;
+      case "tool_execution_end":
+        console.log(
+          `\n[${label}] 工具完成: ${event.isError ? "错误" : "成功"}`,
+        );
+        break;
+      case "turn_start":
+        console.log(`\n[${label}] --- 轮次开始 ---`);
+        break;
+      case "turn_end":
+        console.log(`\n[${label}] --- 轮次结束 ---`);
+        break;
+      case "agent_start":
+        console.log(`\n[${label}] === Agent 开始处理 ===`);
+        break;
+      case "agent_end":
+        console.log(`\n[${label}] === Agent 完成 ===`);
+        break;
+      case "compaction_start":
+        console.log(`\n[${label}] 压缩开始...`);
+        break;
+      case "compaction_end":
+        console.log(`\n[${label}] 压缩完成`);
+        break;
+      case "auto_retry_start":
+        console.log(
+          `\n[${label}] 自动重试 (${event.attempt}/${event.maxAttempts})`,
+        );
+        break;
+      case "auto_retry_end":
+        console.log(`\n[${label}] 重试 ${event.success ? "成功" : "失败"}`);
+        break;
+    }
+  });
+}
+
 // ─── 主流程 ──────────────────────────────────────────────────
 
 async function main() {
@@ -115,7 +172,7 @@ async function main() {
 
   // ── 1. 分析题目 ──────────────────────────────────────────
 
-  log("分析", "开始分析...");
+  log("分析", "开始分析...\n");
 
   const analysisSM = SessionManager.create(WORK_DIR);
   const analysis = await createAgentSession({
@@ -125,6 +182,7 @@ async function main() {
     model,
   });
 
+  const unsubAnalysis = subscribeSession("分析", analysis.session);
   await analysis.session.prompt(
     [
       "分析这道 MCM 竞赛题目，列出至少 3 种不同的解题思路。",
@@ -136,9 +194,12 @@ async function main() {
       "  简短描述",
     ].join("\n"),
   );
+  unsubAnalysis();
+
+  console.log("\n"); // 留空行
 
   const replyText = lastAssistantText(analysis.session.messages);
-  console.log("\n分析结果：\n" + replyText + "\n");
+  console.log("分析结果：\n" + replyText + "\n");
 
   const approachNames = replyText
     .split("\n")
@@ -159,8 +220,6 @@ async function main() {
 
   log("Fork", `从问题消息分叉 ${approachNames.length} 个 Session...`);
 
-  // createBranchedSession 会变异原 SessionManager，只能调用一次。
-  // 保存原始 session 文件路径，每个 fork 都从原始文件重新打开。
   const originalSessionFile = analysisSM.getSessionFile();
   if (!originalSessionFile) throw new Error("分析 session 未持久化，无法 fork");
 
@@ -176,7 +235,6 @@ async function main() {
       const dir = join(WORK_BASE, `approach-${i + 1}`);
       ensureDir(dir);
 
-      // 从原始 session 文件重新打开，避免交错变异
       const sm = SessionManager.open(originalSessionFile);
       const forkPath = sm.createBranchedSession(problemEntry.id);
       if (!forkPath) throw new Error(`Fork 失败: 思路 ${i + 1}`);
@@ -213,13 +271,19 @@ async function main() {
 
   log("编码", `启动 ${codingSessions.length} 个 Agent 并行编码...\n`);
 
+  // 为每个 coding session 订阅事件，用不同标签区分
+  const unsubs = codingSessions.map((cs) =>
+    subscribeSession(`思路${cs.index + 1}`, cs.session),
+  );
+
   const startTime = Date.now();
   const settled = await Promise.allSettled(
     codingSessions.map((cs) => cs.session.prompt("开始编写代码")),
   );
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
-  log("编码", `全部完成，耗时 ${elapsed} 秒\n`);
+  unsubs.forEach((u) => u());
+  console.log(`\n[编码] 全部完成，耗时 ${elapsed} 秒\n`);
 
   // ── 4. 收集结果 ────────────────────────────────────────
 
@@ -274,6 +338,7 @@ async function main() {
     model,
   });
 
+  const unsubReview = subscribeSession("评审", review.session);
   await review.session.prompt(
     [
       "你是一位 MCM 竞赛评审专家。请审阅以下解题代码。",
@@ -286,12 +351,12 @@ async function main() {
       "3. 最终推荐哪个思路作为正式提交方案，并说明理由",
     ].join("\n"),
   );
+  unsubReview();
 
   const reviewText = lastAssistantText(review.session.messages);
   const reportPath = join(WORK_BASE, "review-report.md");
   writeFileSync(reportPath, reviewText, "utf-8");
 
-  console.log(reviewText);
   console.log(`\n报告已保存: ${reportPath}`);
 
   review.session.dispose();
