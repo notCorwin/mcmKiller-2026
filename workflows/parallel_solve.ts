@@ -14,6 +14,11 @@
  *   4. 交叉比对 Agent 审阅所有代码，给出推荐
  */
 
+import { EnvHttpProxyAgent, setGlobalDispatcher } from "undici";
+setGlobalDispatcher(
+  new EnvHttpProxyAgent({ bodyTimeout: 0, headersTimeout: 0 }),
+);
+
 import {
   readFileSync,
   existsSync,
