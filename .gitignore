@@ -38,4 +38,4 @@ coverage/
 PI.md
 
 # Generated solver outputs
-problems/CUMCM-*/work/
+problems/**/work/
