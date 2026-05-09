@@ -36,3 +36,6 @@ coverage/
 
 # SDK reference doc (local copy)
 PI.md
+
+# Generated solver outputs
+problems/CUMCM-*/work/
