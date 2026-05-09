@@ -247,7 +247,7 @@ export async function solveProblem(
       agent: extractorAgent,
       task: buildExtractionTask(analysisOutput),
       cwd,
-      timeoutMs: 30_000,
+      timeoutMs: Math.min(timeoutPerPhaseMs, 300_000), // extractor
     },
     signal,
   );
