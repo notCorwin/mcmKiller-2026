@@ -1,5 +1,5 @@
 ---
-name: 蒙特卡洛模拟
+name: monte-carlo
 description: 蒙特卡洛方法与随机模拟的高性能实现模式
 triggers:
   - "蒙特卡洛"

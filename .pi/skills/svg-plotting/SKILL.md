@@ -1,5 +1,5 @@
 ---
-name: SVG作图要求
+name: svg-plotting
 description: MCM 论文中 SVG 作图的规范与最佳实践
 triggers:
   - "SVG"

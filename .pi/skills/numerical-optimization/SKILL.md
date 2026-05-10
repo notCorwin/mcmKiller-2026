@@ -1,5 +1,5 @@
 ---
-name: 数值优化
+name: numerical-optimization
 description: 数值优化问题的 Python 求解模式（线性规划、非线性规划、组合优化）
 triggers:
   - "优化"

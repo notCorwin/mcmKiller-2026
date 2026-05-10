@@ -1,5 +1,5 @@
 ---
-name: 数据预处理
+name: data-preprocessing
 description: MCM 题目数据加载、清洗与预处理的 Python 模式
 triggers:
   - "CSV"

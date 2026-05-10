@@ -1,5 +1,5 @@
 ---
-name: Python性能优化技巧
+name: python-performance
 description: 指导 Claude 在数学建模场景下，基于 M# 芯片编写高性能 Python3 数值计算脚本，目标性能不低于或优于 MATLAB 实现
 triggers:
   - "数学建模"
