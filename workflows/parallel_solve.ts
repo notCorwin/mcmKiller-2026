@@ -89,6 +89,132 @@ interface Result {
   error?: string;
 }
 
+// ─── CaptureTerminal：为每个 Session 生成类原生终端日志 ─────
+
+interface TerminalWriteOptions {
+  /** 追加到文件时写入标签，例如 `[TOOL bash]` */
+  tag?: string;
+  /** 强制换行 */
+  newline?: boolean;
+}
+
+/**
+ * CaptureTerminal 模拟 pi TUI 的 Terminal 接口，
+ * 将每个 Session 的完整输出（文本增量、thinking、工具执行、轮次信息）
+ * 记录为一份类原生终端风格的日志文件，同时保持实时 stdout 输出。
+ */
+class CaptureTerminal {
+  private chunks: string[] = [];
+  private filePath: string;
+  private label: string;
+  private toolStack: string[] = [];
+
+  constructor(filePath: string, label: string) {
+    this.filePath = filePath;
+    this.label = label;
+  }
+
+  /** 写入文本（模拟 Terminal.write） */
+  write(data: string, opts?: TerminalWriteOptions): void {
+    const tag = opts?.tag ? `[${opts.tag}] ` : "";
+    process.stdout.write(data);
+    this.chunks.push(tag + data);
+  }
+
+  /** 写入一行（模拟 Terminal.writeln） */
+  writeln(data: string, opts?: TerminalWriteOptions): void {
+    this.write(data + "\n", opts);
+  }
+
+  /** 写入分隔线 */
+  hr(char = "─", width = 60): void {
+    const line = char.repeat(width);
+    this.writeln(`\x1b[2m${line}\x1b[22m`, { newline: true });
+  }
+
+  /** Agent 开始 */
+  onAgentStart(): void {
+    this.hr();
+    this.writeln(`  AGENT START  ${this.label}`);
+    this.hr();
+  }
+
+  /** Agent 结束 */
+  onAgentEnd(): void {
+    this.hr();
+    this.writeln(`  AGENT END  ${this.label}`);
+    this.hr();
+    this.writeln("");
+  }
+
+  /** 轮次开始 */
+  onTurnStart(turn: number): void {
+    this.hr("-", 40);
+    this.writeln(`  Turn ${turn}`);
+    this.hr("-", 40);
+  }
+
+  /** 助手文本增量 */
+  onTextDelta(delta: string): void {
+    this.write(delta, { tag: "assistant" });
+  }
+
+  /** 思考增量 */
+  onThinkingDelta(delta: string): void {
+    this.write(delta, { tag: "thinking" });
+  }
+
+  /** 工具开始执行 */
+  onToolStart(name: string, args: any): void {
+    this.toolStack.push(name);
+    const argsStr =
+      typeof args === "string"
+        ? args.slice(0, 200)
+        : JSON.stringify(args).slice(0, 200);
+    this.writeln(`\x1b[36m▸ ${name}\x1b[0m`, { tag: "tool" });
+    if (argsStr) {
+      this.writeln(`  args: ${argsStr}`, { tag: "tool" });
+    }
+  }
+
+  /** 工具执行增量输出 */
+  onToolUpdate(text: string): void {
+    if (!text) return;
+    // 保留 ANSI 以还原终端效果
+    this.write(text);
+  }
+
+  /** 工具执行结束 */
+  onToolEnd(name: string, isError: boolean): void {
+    this.toolStack.pop();
+    const icon = isError ? "\x1b[31m✗\x1b[0m" : "\x1b[32m✓\x1b[0m";
+    this.writeln(`  ${icon} ${name} ${isError ? "(error)" : "(done)"}`);
+  }
+
+  /** 重试开始 */
+  onRetryStart(attempt: number, maxAttempts: number): void {
+    this.writeln(`\x1b[33m⟳ 重试 ${attempt}/${maxAttempts}\x1b[0m`, {
+      tag: "retry",
+    });
+  }
+
+  /** 压缩 */
+  onCompactionStart(): void {
+    this.writeln(`\x1b[33m⊡ 压缩上下文...\x1b[0m`, { tag: "compaction" });
+  }
+
+  /** 将捕获的内容写入日志文件 */
+  flush(): void {
+    // 写入原始内容（保留 ANSI），近似终端原生效果
+    const raw = this.chunks.join("");
+    writeFileSync(this.filePath, raw, "utf-8");
+
+    // 同时写入去 ANSI 的纯文本版本
+    const plainPath = this.filePath.replace(/\.log$/, ".txt");
+    writeFileSync(plainPath, stripAnsiCodes(raw), "utf-8");
+  }
+}
+
 // ─── 基础设施 ────────────────────────────────────────────────
 
 function log(phase: string, msg: string) {
@@ -124,37 +250,79 @@ function lastAssistantText(messages: any[]): string {
     .join("\n");
 }
 
-function subscribeSession(label: string, session: any): () => void {
+function subscribeSession(
+  label: string,
+  session: any,
+  terminal: CaptureTerminal,
+): () => void {
+  let turnCount = 0;
+
   return session.subscribe((event: any) => {
     switch (event.type) {
+      case "agent_start":
+        terminal.onAgentStart();
+        break;
+
+      case "agent_end":
+        terminal.onAgentEnd();
+        break;
+
+      case "turn_start":
+        turnCount++;
+        terminal.onTurnStart(turnCount);
+        break;
+
       case "message_update": {
         const ev = event.assistantMessageEvent;
-        if (ev.type === "text_delta") process.stdout.write(ev.delta);
-        else if (ev.type === "thinking_delta") process.stdout.write(ev.delta);
+        if (ev.type === "text_delta") {
+          terminal.onTextDelta(ev.delta);
+        } else if (ev.type === "thinking_delta") {
+          terminal.onThinkingDelta(ev.delta);
+        }
         break;
       }
+
       case "tool_execution_start":
-        console.log(`\n[${label}] 工具: ${event.toolName}`);
+        terminal.onToolStart(event.toolName, event.args);
         break;
-      case "turn_start":
-        console.log(`\n[${label}] --- 轮次 ---`);
+
+      case "tool_execution_update": {
+        // 提取工具流式输出的文本
+        const text = extractResultText(event.partialResult);
+        if (text) terminal.onToolUpdate(text);
         break;
-      case "agent_start":
-        console.log(`\n[${label}] === 开始 ===`);
+      }
+
+      case "tool_execution_end":
+        terminal.onToolEnd(event.toolName, event.isError);
         break;
-      case "agent_end":
-        console.log(`\n[${label}] === 完成 ===`);
-        break;
+
       case "compaction_start":
-        console.log(`\n[${label}] 压缩中...`);
+        terminal.onCompactionStart();
         break;
+
       case "auto_retry_start":
-        console.log(
-          `\n[${label}] 重试 (${event.attempt}/${event.maxAttempts})`,
-        );
+        terminal.onRetryStart(event.attempt, event.maxAttempts);
         break;
     }
   });
+}
+
+/** 去除 ANSI 转义序列 */
+function stripAnsiCodes(s: string): string {
+  return s
+    .replace(/\x1b\[[0-9;:]*[a-zA-Z]/g, "")
+    .replace(/\x1b\][\s\S]*?(?:\x1b\\|\x07|\x1b)/g, "")
+    .replace(/\x9b[0-9;:]*[a-zA-Z]/g, "");
+}
+
+/** 从 AgentToolResult 中提取全部文本内容 */
+function extractResultText(result: any): string {
+  if (!result?.content) return "";
+  return result.content
+    .filter((c: any) => c.type === "text")
+    .map((c: any) => c.text)
+    .join("");
 }
 
 // ─── 自定义工具：Agent 调用它提交结构化的解题思路 ─────────
@@ -280,9 +448,14 @@ async function main() {
     customTools: [listApproachesTool],
   });
 
-  const unsub = subscribeSession("分析", analysis.session);
+  const analysisTerm = new CaptureTerminal(
+    join(WORK_BASE, "analysis.log"),
+    "分析",
+  );
+  const unsub = subscribeSession("分析", analysis.session, analysisTerm);
   await analysis.session.prompt(buildAnalysisPrompt());
   unsub();
+  analysisTerm.flush();
   console.log("\n");
 
   let approaches = extractApproaches(analysis.session);
@@ -371,8 +544,16 @@ async function main() {
 
   log("编码", `启动 ${codingSessions.length} 个 Agent...\n`);
 
-  const unsubs = codingSessions.map((cs) =>
-    subscribeSession(`思路${cs.approach.index + 1}`, cs.session),
+  const terminals = codingSessions.map(
+    (cs) =>
+      new CaptureTerminal(
+        join(cs.dir, "session.log"),
+        `思路 ${cs.approach.index + 1}：${cs.approach.name}`,
+      ),
+  );
+
+  const unsubs = codingSessions.map((cs, i) =>
+    subscribeSession(`思路${cs.approach.index + 1}`, cs.session, terminals[i]),
   );
 
   const startTime = Date.now();
@@ -381,6 +562,7 @@ async function main() {
   );
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   unsubs.forEach((u) => u());
+  terminals.forEach((t) => t.flush());
 
   console.log(`\n[编码] 完成，耗时 ${elapsed}s\n`);
 
@@ -460,7 +642,8 @@ async function main() {
     model,
   });
 
-  const unsubReview = subscribeSession("评审", review.session);
+  const reviewTerm = new CaptureTerminal(join(WORK_BASE, "review.log"), "评审");
+  const unsubReview = subscribeSession("评审", review.session, reviewTerm);
   await review.session.prompt(
     [
       "你是一位 MCM 竞赛评审专家。请审阅以下解题代码。",
@@ -475,6 +658,7 @@ async function main() {
     ].join("\n"),
   );
   unsubReview();
+  reviewTerm.flush();
 
   const reviewText = lastAssistantText(review.session.messages);
   const reportPath = join(WORK_BASE, "review-report.md");
