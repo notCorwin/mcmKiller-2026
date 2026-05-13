@@ -1,1 +1,1 @@
-mcmKiller 是一个用 pi SDK 做 MCM 竞赛的项目。
+mcmKiller 是一个整合了 Pi RPC 和 Typst 的 CUMCM（A题） 的工作流。
