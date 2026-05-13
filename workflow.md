@@ -32,5 +32,5 @@
     继续延用Session Qi-approach_j的上下文，开始编写解题代码
     将结果写入result.md
   将Pi的工作目录设置到\work\Qi
-  交叉比对所有approach_j\solving\result.md，分析不同approach答案不同的原因。并判定是否需要改进某一approach的代码。将result、误差原因、判定结果写到summary.md
+  比对所有 `approach_j/solving/result.md`，分析不同 approach 答案差异的原因，判定是否需要改进代码。将结果、不同方法的结果差异原因及判定写入 `summary.md`。
 ```
