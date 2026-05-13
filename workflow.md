@@ -15,14 +15,14 @@
 
 ## Analysis｜Modeling｜Solving
 
-```python
-for i in range(1, n+1):
+```
+对第 i 道题（i = 1, 2, …, n）依次执行下面的操作，其中 n 为题目总数
   将Pi的工作目录设置到\work\Qi
   将Session Assumptions导入到新会话中，记为Session Analysis-Qi
   分析Qi.md，列举出所有高效且具有创新性的解题思路 m 条
   为每条解题思路创建一个文件夹（\work\Qi\approach_1到\work\Qi\approach_m）
   为每条解题思路写一份文档analysis.md到各自思路的文件夹中
-  for j in range(1, m+1):
+  对第 j 条思路（j = 1, 2, …, m）依次执行下面的操作，其中 m 为思路条数
     将Pi的工作目录设置到\work\Qi\approach_j
     将Session Analysis-Qi导入到新会话中，记为Session Qi-approach_j
     基于approach_j建立模型（此步不使用代码求解）
@@ -32,6 +32,5 @@ for i in range(1, n+1):
     继续延用Session Qi-approach_j的上下文，开始编写解题代码
     将结果写入result.md
   将Pi的工作目录设置到\work\Qi
-  交叉比对所有approach_j\solving\result.md，分析不同approach答案不同的原因。并判定是否需要改进某一approach的代码。将result、误差原因、判定结果写到summary.md。
+  交叉比对所有approach_j\solving\result.md，分析不同approach答案不同的原因。并判定是否需要改进某一approach的代码。将result、误差原因、判定结果写到summary.md
 ```
-
