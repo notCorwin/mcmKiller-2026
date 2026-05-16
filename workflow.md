@@ -22,8 +22,8 @@
   分析Qi.md，列举出所有**高效**且具有**创新**性的解题思路 m 条
   为每条解题思路创建一个文件夹（\work\Qi\approach_1到\work\Qi\approach_m）
   为每条解题思路写一份文档analysis.md到各自思路的文件夹中
-  使用 Tmux 为每条思路分屏
-  对第 j 条思路（j = 1, 2, …, m）依次执行下面的操作
+  使用 Tmux 为每条思路分屏并启动Pi
+  对第 j 条思路（j = 1, 2, …, m）同时按顺序执行下面的操作
     将Pi的工作目录设置到\work\Qi\approach_j
     将Session Analysis-Qi导入到新会话中，记为Session Qi-approach_j
     基于approach_j建立模型（此步不使用代码求解）
@@ -33,8 +33,7 @@
     继续延用Session Qi-approach_j的上下文，开始编写解题代码
     将结果写入result.md
   将Pi的工作目录设置到\work\Qi
-  比对所有 `approach_j/solving/result.md`，分析不同 approach 答案差异的原因，比较哪个方案更高效，同时具有创新性
-  将结果、不同方法的结果差异原因及判定写入 `summary.md`
+  比对所有 `approach_j/solving/result.md`，分析不同 approach 答案差异的原因
   
 ```
 
